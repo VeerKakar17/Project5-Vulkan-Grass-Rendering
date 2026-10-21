@@ -66,7 +66,7 @@ namespace {
 }
 
 int main() {
-    static constexpr char* applicationName = "Vulkan Grass Rendering";
+    static constexpr const char* applicationName = "Vulkan Grass Rendering";
     InitializeWindow(640, 480, applicationName);
 
     unsigned int glfwExtensionCount = 0;
