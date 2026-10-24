@@ -7,6 +7,7 @@ layout(local_size_x = WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 layout(set = 0, binding = 0) uniform CameraBufferObject {
     mat4 view;
     mat4 proj;
+    vec4 pos;
 } camera;
 
 layout(set = 1, binding = 0) uniform Time {
@@ -26,24 +27,83 @@ struct Blade {
 // 2. Write out the culled blades
 // 3. Write the total number of blades remaining
 
+layout(set = 2, binding = 0) buffer InputBlades {
+    Blade blades[];
+} inputBlades;
+
+layout(set = 2, binding = 1) buffer OutputBlades {
+    Blade blades[];
+} outputBlades;
+
 // The project is using vkCmdDrawIndirect to use a buffer as the arguments for a draw call
 // This is sort of an advanced feature so we've showed you what this buffer should look like
 //
-// layout(set = ???, binding = ???) buffer NumBlades {
-// 	  uint vertexCount;   // Write the number of blades remaining here
-// 	  uint instanceCount; // = 1
-// 	  uint firstVertex;   // = 0
-// 	  uint firstInstance; // = 0
-// } numBlades;
+layout(set = 2, binding = 2) buffer NumBlades {
+    uint vertexCount;   // Write the number of blades remaining here
+	uint instanceCount; // = 1
+	uint firstVertex;   // = 0
+	uint firstInstance; // = 0
+} numBlades;
 
 bool inBounds(float value, float bounds) {
     return (value >= -bounds) && (value <= bounds);
 }
 
+bool testPointViewFrustum(mat4 vp, vec4 p) {
+    const float t = 0.001;
+
+    vec4 n_p = vp * vec4(p.xyz, 1.0);
+    float h = n_p.w + t;
+
+    return (n_p.x<-h||n_p.x>h) || (n_p.y<-h||n_p.y>h) || (n_p.z<-h||n_p.z>h);
+}
+
+bool isCulled(Blade blade, uint bladeIdx) {
+    vec4 m = 0.25 * blade.v0 + 0.5 * blade.v1 + 0.25 * blade.v2;
+
+    // Orientation Test
+    vec3 upDir = normalize(blade.up.xyz);
+    float angle = blade.v0.w;
+    vec3 width_dir = vec3(cos(angle), 0.0, sin(angle));
+
+    vec3 toCam = camera.pos.xyz - blade.v0.xyz;
+    vec3 viewInPlane = normalize(toCam - dot(toCam, upDir) * upDir);
+
+    if (0.9 <= abs(dot(viewInPlane, width_dir))) {
+        return true;
+    }
+
+    // View-frustum Test
+    mat4 vp = camera.proj * camera.view;
+
+    if (testPointViewFrustum(vp, blade.v0) && testPointViewFrustum(vp, blade.v2) 
+            && testPointViewFrustum(vp, m)) {
+        return true;
+    }
+
+    // Distance test
+    vec3 delta = blade.v0.xyz - camera.pos.xyz;
+    float d_proj = length(delta - upDir * dot(delta, upDir));
+    const float d_max = 10;
+    const uint n = 10;
+
+    float dist_cull_threshold = floor(float(n) * (1 - d_proj / d_max));
+
+    if (d_proj > d_max || bladeIdx % n < dist_cull_threshold) {
+        return true;
+    }
+
+    // Occlusion Test not supported yet
+
+    return false;
+}
+
 void main() {
+    uint bladeIdx = gl_GlobalInvocationID.x;
+
 	// Reset the number of blades to 0
-	if (gl_GlobalInvocationID.x == 0) {
-		// numBlades.vertexCount = 0;
+	if (bladeIdx == 0) {
+		numBlades.vertexCount = 0;
 	}
 	barrier(); // Wait till all threads reach this point
 
@@ -53,4 +113,11 @@ void main() {
 	// to the culled blades buffer
 	// Note: to do this, you will need to use an atomic operation to read and update numBlades.vertexCount
 	// You want to write the visible blades to the buffer without write conflicts between threads
+
+
+    Blade blade = inputBlades.blades[bladeIdx];
+    if (!isCulled(blade, bladeIdx)) {
+        uint outputIdx = atomicAdd(numBlades.vertexCount, 1);
+        outputBlades.blades[outputIdx] = blade;
+    }
 }
