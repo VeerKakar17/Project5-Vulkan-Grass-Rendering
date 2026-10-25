@@ -84,8 +84,8 @@ bool isCulled(Blade blade, uint bladeIdx) {
     // Distance test
     vec3 delta = blade.v0.xyz - camera.pos.xyz;
     float d_proj = length(delta - upDir * dot(delta, upDir));
-    const float d_max = 10;
-    const uint n = 10;
+    const float d_max = 20; // PARAM
+    const uint n = 50; // PARAM
 
     float dist_cull_threshold = floor(float(n) * (1 - d_proj / d_max));
 
