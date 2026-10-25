@@ -13,7 +13,7 @@ layout(set = 0, binding = 0) uniform CameraBufferObject {
 layout(set = 1, binding = 0) uniform Time {
     float deltaTime;
     float totalTime;
-};
+} time;
 
 struct Blade {
     vec4 v0;
@@ -88,14 +88,83 @@ bool isCulled(Blade blade, uint bladeIdx) {
     const uint n = 50; // PARAM
 
     float dist_cull_threshold = floor(float(n) * (1 - d_proj / d_max));
+    float keepCount = floor(float(n) * (1.0 - d_proj / d_max));
 
-    if (d_proj > d_max || bladeIdx % n < dist_cull_threshold) {
+    if (d_proj > d_max || bladeIdx % n >= keepCount) {
         return true;
     }
 
     // Occlusion Test not supported yet
 
     return false;
+}
+
+vec3 get_recovery(Blade blade, float col_str) {
+    vec3 Iv2 = blade.v0.xyz + blade.up.xyz * blade.v1.w;
+    return (Iv2 - blade.v2.xyz) * blade.up.w * max(1 - col_str, 0.1);
+}
+
+vec3 get_gravity(Blade blade) {
+    vec4 D = vec4(0, -1, 0, 9.8);
+    float m = 1;
+
+    vec3 ge_global = (D.xyz / length(D.xyz)) * D.w; 
+    vec3 ge = m * ge_global;
+    
+    vec3 upDir = normalize(blade.up.xyz);
+    vec3 widthDir = normalize(vec3(cos(blade.v0.w), 0.0, sin(blade.v0.w)));
+    vec3 f = normalize(cross(upDir, widthDir));
+    vec3 gf = 0.25 * length(ge) * f;
+
+    return ge + gf;
+}
+
+
+vec3 get_wind(Blade blade) {
+    // A deliberately simple test force: gust strength changes about every
+    // 10 seconds, while the horizontal wind direction rotates much slower.
+    const float baseStrength = 2.5;
+    const float gustAmplitude = 0.35;
+    const float gustAngularSpeed = 0.65;
+    const float directionAngularSpeed = 0.10;
+
+    // A small spatial phase avoids every blade reaching its gust peak at once.
+    float phase = dot(blade.v0.xz, vec2(0.17, 0.11));
+    float strength = baseStrength *
+        (1.0 + gustAmplitude * sin(time.totalTime * gustAngularSpeed + phase));
+
+    float directionAngle = time.totalTime * directionAngularSpeed;
+    vec3 direction = vec3(cos(directionAngle), 0.0, sin(directionAngle));
+
+    return direction * strength;
+}
+
+vec3 get_displacement(Blade blade) {
+    return vec3(0);
+}
+
+void validate_blade(inout Blade blade) {
+    // Ensure v2 above local plane
+    blade.v2 = vec4(blade.v2.xyz - blade.up.xyz * min(blade.up.xyz * (blade.v2.xyz - blade.v0.xyz), 0), blade.v2.w);
+
+    // calculate v1 position
+    float l_proj = length(blade.v2.xyz - blade.v0.xyz - blade.up.xyz * ((blade.v2.xyz - blade.v0.xyz) * blade.up.xyz));
+    float height = blade.v1.w;
+    blade.v1 = vec4(blade.v0.xyz + height * blade.up.xyz * max(1 - l_proj / height, 0.05 * max(l_proj / height, 1)), height);
+
+    // Ensure length of bezier curve not larger than height of blade
+    float L0 = length(blade.v2.xyz - blade.v0.xyz);
+    float L1 = length(blade.v1.xyz - blade.v0.xyz)
+            + length(blade.v2.xyz - blade.v1.xyz);
+    float n = 2;
+    float L = (2 * L0 + (n-1) * L1) / (n + 1);
+
+    float r = height / L;
+    vec3 v1_corr = blade.v0.xyz + r * (blade.v1.xyz - blade.v0.xyz);
+    vec3 v2_corr = v1_corr + r * (blade.v2.xyz - blade.v1.xyz);
+
+    blade.v1 = vec4(v1_corr, blade.v1.w);
+    blade.v2 = vec4(v2_corr, blade.v2.w);
 }
 
 void main() {
@@ -106,16 +175,22 @@ void main() {
 		numBlades.vertexCount = 0;
 	}
 	barrier(); // Wait till all threads reach this point
-
-    // TODO: Apply forces on every blade and update the vertices in the buffer
-
-	// TODO: Cull blades that are too far away or not in the camera frustum and write them
-	// to the culled blades buffer
-	// Note: to do this, you will need to use an atomic operation to read and update numBlades.vertexCount
-	// You want to write the visible blades to the buffer without write conflicts between threads
-
-
+    
     Blade blade = inputBlades.blades[bladeIdx];
+
+    // Apply forces on every blade and update the vertices in the buffer
+    vec3 r = get_recovery(blade, 0);
+    vec3 g = get_gravity(blade);
+    vec3 w = get_wind(blade);
+    vec3 d = get_displacement(blade);
+    vec3 delta = (r + g + w) * time.deltaTime + d;
+
+    blade.v2 += vec4(delta, 0);
+
+    validate_blade(blade);
+
+    inputBlades.blades[bladeIdx] = blade;
+
     if (!isCulled(blade, bladeIdx)) {
         uint outputIdx = atomicAdd(numBlades.vertexCount, 1);
         outputBlades.blades[outputIdx] = blade;

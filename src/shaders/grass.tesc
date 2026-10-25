@@ -6,6 +6,7 @@ layout(vertices = 1) out;
 layout(set = 0, binding = 0) uniform CameraBufferObject {
     mat4 view;
     mat4 proj;
+    vec4 pos;
 } camera;
 
 // TODO: Declare tessellation control shader inputs and outputs
@@ -31,10 +32,15 @@ void main() {
     out_up[gl_InvocationID] = up[gl_InvocationID];
 
 	// TODO: Set level of tesselation
-    gl_TessLevelInner[0] = 2;
-    gl_TessLevelInner[1] = 2;
-    gl_TessLevelOuter[0] = 8;
-    gl_TessLevelOuter[1] = 4;
-    gl_TessLevelOuter[2] = 8;
-    gl_TessLevelOuter[3] = 4;
+    vec3 delta = v0[0].xyz - camera.pos.xyz;
+    float d_proj = length(delta - up[0].xyz * dot(delta, up[0].xyz));
+
+    float lod_scalar = max(1, d_proj / 4);
+
+    gl_TessLevelInner[0] = 8 / lod_scalar;
+    gl_TessLevelInner[1] = 8 / lod_scalar;
+    gl_TessLevelOuter[0] = 32 / lod_scalar;
+    gl_TessLevelOuter[1] = 16 / lod_scalar;
+    gl_TessLevelOuter[2] = 32 / lod_scalar;
+    gl_TessLevelOuter[3] = 16 / lod_scalar;
 }
