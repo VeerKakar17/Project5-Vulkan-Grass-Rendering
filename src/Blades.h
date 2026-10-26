@@ -74,15 +74,18 @@ private:
     VkBuffer bladesBuffer;
     VkBuffer culledBladesBuffer;
     VkBuffer numBladesBuffer;
+    VkBuffer collisionStrengthsBuffer;
 
     VkDeviceMemory bladesBufferMemory;
     VkDeviceMemory culledBladesBufferMemory;
     VkDeviceMemory numBladesBufferMemory;
+    VkDeviceMemory collisionStrengthsBufferMemory;
 
 public:
     Blades(Device* device, VkCommandPool commandPool, float planeDim);
     VkBuffer GetBladesBuffer() const;
     VkBuffer GetCulledBladesBuffer() const;
     VkBuffer GetNumBladesBuffer() const;
+    VkBuffer GetBladeCollisionStrengths() const;
     ~Blades();
 };

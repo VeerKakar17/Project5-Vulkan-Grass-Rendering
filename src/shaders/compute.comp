@@ -45,6 +45,15 @@ layout(set = 2, binding = 2) buffer NumBlades {
 	uint firstInstance; // = 0
 } numBlades;
 
+layout(set = 2, binding = 3) buffer CollisionState {
+    float collisionStrengths[];
+} collisionState;
+
+layout(set = 3, binding = 0) buffer Spheres {
+    vec4 spheres[]; // xyz center, w radiux
+} spheres;
+
+
 bool inBounds(float value, float bounds) {
     return (value >= -bounds) && (value <= bounds);
 }
@@ -139,8 +148,30 @@ vec3 get_wind(Blade blade) {
     return direction * strength;
 }
 
-vec3 get_displacement(Blade blade) {
-    return vec3(0);
+void add_displacement(inout Blade blade, uint bladeIdx) {
+    vec3 m = 0.25 * blade.v0.xyz + 0.5 * blade.v1.xyz + 0.25 * blade.v2.xyz;
+
+    for (int i = 0; i < 2; i++) {
+        vec4 sphere = spheres.spheres[i];
+        float collisionRadius = sphere.w + 0.5 * blade.v2.w;
+
+        vec3 d_v2 = min(length(sphere.xyz - blade.v2.xyz) - collisionRadius, 0) * normalize(sphere.xyz - blade.v2.xyz);
+
+        if (length(d_v2) != 0) {
+            collisionState.collisionStrengths[bladeIdx] += dot(d_v2, d_v2);
+            blade.v2.xyz += d_v2;
+
+            m = 0.25 * blade.v0.xyz + 0.5 * blade.v1.xyz + 0.25 * blade.v2.xyz;
+        }
+        
+        vec3 d_m = min(length(sphere.xyz - m) - collisionRadius, 0) * normalize(sphere.xyz - m);
+        if (length(d_m) != 0) {
+            collisionState.collisionStrengths[bladeIdx] += dot(d_m, d_m);
+            blade.v2.xyz += 4.0 * d_m;
+
+            m = 0.25 * blade.v0.xyz + 0.5 * blade.v1.xyz + 0.25 * blade.v2.xyz;
+        }
+    }
 }
 
 void validate_blade(inout Blade blade) {
@@ -177,15 +208,18 @@ void main() {
 	barrier(); // Wait till all threads reach this point
     
     Blade blade = inputBlades.blades[bladeIdx];
+    const float a = 1;
+    collisionState.collisionStrengths[bladeIdx] = max(collisionState.collisionStrengths[bladeIdx] - a * time.deltaTime, 0);
 
     // Apply forces on every blade and update the vertices in the buffer
-    vec3 r = get_recovery(blade, 0);
+    vec3 r = get_recovery(blade, collisionState.collisionStrengths[bladeIdx]);
     vec3 g = get_gravity(blade);
     vec3 w = get_wind(blade);
-    vec3 d = get_displacement(blade);
-    vec3 delta = (r + g + w) * time.deltaTime + d;
 
+    vec3 delta = (r + g + w) * time.deltaTime;
     blade.v2 += vec4(delta, 0);
+
+    add_displacement(blade, bladeIdx);
 
     validate_blade(blade);
 

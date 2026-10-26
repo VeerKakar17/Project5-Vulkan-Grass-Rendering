@@ -6,10 +6,54 @@
 #include "Scene.h"
 #include "Image.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <cmath>
+#include <vector>
+
 Device* device;
 SwapChain* swapChain;
 Renderer* renderer;
 Camera* camera;
+
+namespace {
+    Model* CreateSphereModel(Device* device, VkCommandPool commandPool) {
+        constexpr uint32_t rings = 16;
+        constexpr uint32_t segments = 24;
+        constexpr float pi = 3.14159265f;
+
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indices;
+        vertices.reserve((rings + 1) * (segments + 1));
+        indices.reserve(rings * segments * 6);
+
+        for (uint32_t y = 0; y <= rings; ++y) {
+            float v = static_cast<float>(y) / static_cast<float>(rings);
+            float phi = v * pi;
+            for (uint32_t x = 0; x <= segments; ++x) {
+                float u = static_cast<float>(x) / static_cast<float>(segments);
+                float theta = u * 2.0f * pi;
+                glm::vec3 position(
+                    std::sin(phi) * std::cos(theta),
+                    std::cos(phi),
+                    std::sin(phi) * std::sin(theta)
+                );
+                // The normal is encoded in color for the solid-color shader path.
+                vertices.push_back({ position, position * 0.5f + 0.5f, { u, v } });
+            }
+        }
+
+        for (uint32_t y = 0; y < rings; ++y) {
+            for (uint32_t x = 0; x < segments; ++x) {
+                uint32_t a = y * (segments + 1) + x;
+                uint32_t b = a + segments + 1;
+                indices.insert(indices.end(), { a, b, a + 1, a + 1, b, b + 1 });
+            }
+        }
+
+        return new Model(device, commandPool, vertices, indices);
+    }
+}
 
 namespace {
     void resizeCallback(GLFWwindow* window, int width, int height) {
@@ -130,11 +174,19 @@ int main() {
     plane->SetTexture(grassImage);
     
     Blades* blades = new Blades(device, transferCommandPool, planeDim);
+    Model* colliderSphere = CreateSphereModel(device, transferCommandPool);
+    colliderSphere->SetTexture(grassImage);
+    colliderSphere->SetSolidColor(glm::vec4(0.95f, 0.0f, 0.95f, 1.0f));
+    Model* colliderSphere2 = CreateSphereModel(device, transferCommandPool);
+    colliderSphere2->SetTexture(grassImage);
+    colliderSphere2->SetSolidColor(glm::vec4(0.0f, 0.95f, 0.95f, 1.0f));
 
     vkDestroyCommandPool(device->GetVkDevice(), transferCommandPool, nullptr);
 
     Scene* scene = new Scene(device);
     scene->AddModel(plane);
+    scene->AddModel(colliderSphere);
+    scene->AddModel(colliderSphere2);
     scene->AddBlades(blades);
 
     renderer = new Renderer(device, swapChain, scene, camera);
@@ -146,6 +198,16 @@ int main() {
     while (!ShouldQuit()) {
         glfwPollEvents();
         scene->UpdateTime();
+        const Collider& collider = scene->GetCollider(0);
+        colliderSphere->SetModelMatrix(
+            glm::translate(glm::mat4(1.0f), glm::vec3(collider.centerRadius)) *
+            glm::scale(glm::mat4(1.0f), glm::vec3(collider.centerRadius.w))
+        );
+        const Collider& collider2 = scene->GetCollider(1);
+        colliderSphere2->SetModelMatrix(
+            glm::translate(glm::mat4(1.0f), glm::vec3(collider2.centerRadius)) *
+            glm::scale(glm::mat4(1.0f), glm::vec3(collider2.centerRadius.w))
+        );
         renderer->Frame();
     }
 
@@ -155,6 +217,8 @@ int main() {
     vkFreeMemory(device->GetVkDevice(), grassImageMemory, nullptr);
 
     delete scene;
+    delete colliderSphere2;
+    delete colliderSphere;
     delete plane;
     delete blades;
     delete camera;

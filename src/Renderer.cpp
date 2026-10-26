@@ -21,12 +21,14 @@ Renderer::Renderer(Device* device, SwapChain* swapChain, Scene* scene, Camera* c
     CreateModelDescriptorSetLayout();
     CreateTimeDescriptorSetLayout();
     CreateComputeDescriptorSetLayout();
+    CreateColliderDescriptorSetLayout();
     CreateDescriptorPool();
     CreateCameraDescriptorSet();
     CreateModelDescriptorSets();
     CreateGrassDescriptorSets();
     CreateTimeDescriptorSet();
     CreateComputeDescriptorSets();
+    CreateColliderDescriptorSets();
     CreateFrameResources();
     CreateGraphicsPipeline();
     CreateGrassPipeline();
@@ -220,7 +222,14 @@ void Renderer::CreateComputeDescriptorSetLayout() {
     uboLayoutBinding2.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     uboLayoutBinding2.pImmutableSamplers = nullptr;
 
-    std::vector<VkDescriptorSetLayoutBinding> bindings = { uboLayoutBinding0, uboLayoutBinding1, uboLayoutBinding2 };
+    VkDescriptorSetLayoutBinding uboLayoutBinding3 = {};
+    uboLayoutBinding3.binding = 3;
+    uboLayoutBinding3.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    uboLayoutBinding3.descriptorCount = 1;
+    uboLayoutBinding3.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    uboLayoutBinding3.pImmutableSamplers = nullptr;
+
+    std::vector<VkDescriptorSetLayoutBinding> bindings = { uboLayoutBinding0, uboLayoutBinding1, uboLayoutBinding2, uboLayoutBinding3};
 
     // Create the descriptor set layout
     VkDescriptorSetLayoutCreateInfo layoutInfo = {};
@@ -232,6 +241,28 @@ void Renderer::CreateComputeDescriptorSetLayout() {
         throw std::runtime_error("Failed to create descriptor set layout");
     }
 }
+
+void Renderer::CreateColliderDescriptorSetLayout() {
+    VkDescriptorSetLayoutBinding uboLayoutBinding0 = {};
+    uboLayoutBinding0.binding = 0;
+    uboLayoutBinding0.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    uboLayoutBinding0.descriptorCount = 1;
+    uboLayoutBinding0.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    uboLayoutBinding0.pImmutableSamplers = nullptr;
+
+    std::vector<VkDescriptorSetLayoutBinding> bindings = { uboLayoutBinding0 };
+
+    // Create the descriptor set layout
+    VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
+
+    if (vkCreateDescriptorSetLayout(logicalDevice, &layoutInfo, nullptr, &colliderDescriptorSetLayout) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create descriptor set layout");
+    }
+}
+
 
 void Renderer::CreateDescriptorPool() {
     // Describe which descriptor types that the descriptor sets will contain
@@ -250,15 +281,18 @@ void Renderer::CreateDescriptorPool() {
 
         // TODO: Add any additional types and counts of descriptors you will need to allocate
         
-        // Compute
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<uint32_t>(scene->GetBlades().size() * 3) },
+        // Compute 
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<uint32_t>(scene->GetBlades().size() * 4 + 1) },
     };
 
     VkDescriptorPoolCreateInfo poolInfo = {};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = 5;
+    poolInfo.maxSets = static_cast<uint32_t>(
+        1 + scene->GetModels().size() + scene->GetBlades().size() +
+        1 + scene->GetBlades().size() + 1
+    );
 
     if (vkCreateDescriptorPool(logicalDevice, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create descriptor pool");
@@ -304,12 +338,14 @@ void Renderer::CreateModelDescriptorSets() {
     modelDescriptorSets.resize(scene->GetModels().size());
 
     // Describe the desciptor set
-    VkDescriptorSetLayout layouts[] = { modelDescriptorSetLayout };
+    std::vector<VkDescriptorSetLayout> layouts(
+        modelDescriptorSets.size(), modelDescriptorSetLayout
+    );
     VkDescriptorSetAllocateInfo allocInfo = {};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = descriptorPool;
     allocInfo.descriptorSetCount = static_cast<uint32_t>(modelDescriptorSets.size());
-    allocInfo.pSetLayouts = layouts;
+    allocInfo.pSetLayouts = layouts.data();
 
     // Allocate descriptor sets
     if (vkAllocateDescriptorSets(logicalDevice, &allocInfo, modelDescriptorSets.data()) != VK_SUCCESS) {
@@ -317,18 +353,18 @@ void Renderer::CreateModelDescriptorSets() {
     }
 
     std::vector<VkWriteDescriptorSet> descriptorWrites(2 * modelDescriptorSets.size());
+    std::vector<VkDescriptorBufferInfo> modelBufferInfos(modelDescriptorSets.size());
+    std::vector<VkDescriptorImageInfo> imageInfos(modelDescriptorSets.size());
 
     for (uint32_t i = 0; i < scene->GetModels().size(); ++i) {
-        VkDescriptorBufferInfo modelBufferInfo = {};
-        modelBufferInfo.buffer = scene->GetModels()[i]->GetModelBuffer();
-        modelBufferInfo.offset = 0;
-        modelBufferInfo.range = sizeof(ModelBufferObject);
+        modelBufferInfos[i].buffer = scene->GetModels()[i]->GetModelBuffer();
+        modelBufferInfos[i].offset = 0;
+        modelBufferInfos[i].range = sizeof(ModelBufferObject);
 
         // Bind image and sampler resources to the descriptor
-        VkDescriptorImageInfo imageInfo = {};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = scene->GetModels()[i]->GetTextureView();
-        imageInfo.sampler = scene->GetModels()[i]->GetTextureSampler();
+        imageInfos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[i].imageView = scene->GetModels()[i]->GetTextureView();
+        imageInfos[i].sampler = scene->GetModels()[i]->GetTextureSampler();
 
         descriptorWrites[2 * i + 0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[2 * i + 0].dstSet = modelDescriptorSets[i];
@@ -336,7 +372,7 @@ void Renderer::CreateModelDescriptorSets() {
         descriptorWrites[2 * i + 0].dstArrayElement = 0;
         descriptorWrites[2 * i + 0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         descriptorWrites[2 * i + 0].descriptorCount = 1;
-        descriptorWrites[2 * i + 0].pBufferInfo = &modelBufferInfo;
+        descriptorWrites[2 * i + 0].pBufferInfo = &modelBufferInfos[i];
         descriptorWrites[2 * i + 0].pImageInfo = nullptr;
         descriptorWrites[2 * i + 0].pTexelBufferView = nullptr;
 
@@ -346,7 +382,7 @@ void Renderer::CreateModelDescriptorSets() {
         descriptorWrites[2 * i + 1].dstArrayElement = 0;
         descriptorWrites[2 * i + 1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         descriptorWrites[2 * i + 1].descriptorCount = 1;
-        descriptorWrites[2 * i + 1].pImageInfo = &imageInfo;
+        descriptorWrites[2 * i + 1].pImageInfo = &imageInfos[i];
     }
 
     // Update descriptor sets
@@ -448,36 +484,73 @@ void Renderer::CreateComputeDescriptorSets() {
         throw std::runtime_error("Failed to allocate descriptor set");
     }
 
-    std::vector<VkDescriptorBufferInfo> bufferInfos(bladeGroups.size() * 3);
-    std::vector<VkWriteDescriptorSet> descriptorWrites(bladeGroups.size() * 3);
+    std::vector<VkDescriptorBufferInfo> bufferInfos(bladeGroups.size() * 4);
+    std::vector<VkWriteDescriptorSet> descriptorWrites(bladeGroups.size() * 4);
 
     for (size_t i = 0; i < bladeGroups.size(); ++i) {
-        bufferInfos[3 * i + 0].buffer = bladeGroups[i]->GetBladesBuffer();
-        bufferInfos[3 * i + 0].offset = 0;
-        bufferInfos[3 * i + 0].range = VK_WHOLE_SIZE;
+        bufferInfos[4 * i + 0].buffer = bladeGroups[i]->GetBladesBuffer();
+        bufferInfos[4 * i + 0].offset = 0;
+        bufferInfos[4 * i + 0].range = VK_WHOLE_SIZE;
 
-        bufferInfos[3 * i + 1].buffer = bladeGroups[i]->GetCulledBladesBuffer();
-        bufferInfos[3 * i + 1].offset = 0;
-        bufferInfos[3 * i + 1].range = VK_WHOLE_SIZE;
+        bufferInfos[4 * i + 1].buffer = bladeGroups[i]->GetCulledBladesBuffer();
+        bufferInfos[4 * i + 1].offset = 0;
+        bufferInfos[4 * i + 1].range = VK_WHOLE_SIZE;
 
-        bufferInfos[3 * i + 2].buffer = bladeGroups[i]->GetNumBladesBuffer();
-        bufferInfos[3 * i + 2].offset = 0;
-        bufferInfos[3 * i + 2].range = VK_WHOLE_SIZE;
+        bufferInfos[4 * i + 2].buffer = bladeGroups[i]->GetNumBladesBuffer();
+        bufferInfos[4 * i + 2].offset = 0;
+        bufferInfos[4 * i + 2].range = VK_WHOLE_SIZE;
+       
+        bufferInfos[4 * i + 3].buffer = bladeGroups[i]->GetBladeCollisionStrengths();
+        bufferInfos[4 * i + 3].offset = 0;
+        bufferInfos[4 * i + 3].range = VK_WHOLE_SIZE;
 
-        for (uint32_t binding = 0; binding < 3; ++binding) {
-            VkWriteDescriptorSet& write = descriptorWrites[3 * i + binding];
+        for (uint32_t binding = 0; binding < 4; ++binding) {
+            VkWriteDescriptorSet& write = descriptorWrites[4 * i + binding];
             write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             write.dstSet = computeDescriptorSets[i];
             write.dstBinding = binding;
             write.dstArrayElement = 0;
             write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             write.descriptorCount = 1;
-            write.pBufferInfo = &bufferInfos[3 * i + binding];
+            write.pBufferInfo = &bufferInfos[4 * i + binding];
         }
     }
 
     vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 }
+
+void Renderer::CreateColliderDescriptorSets() {
+    std::vector<VkDescriptorSetLayout> layouts = {colliderDescriptorSetLayout};
+
+    VkDescriptorSetAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = descriptorPool;
+    allocInfo.descriptorSetCount = static_cast<uint32_t>(layouts.size());
+    allocInfo.pSetLayouts = layouts.data();
+
+    if (vkAllocateDescriptorSets(logicalDevice, &allocInfo, &colliderDescriptorSet) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate descriptor set");
+    }
+
+    std::vector<VkWriteDescriptorSet> descriptorWrites(1);
+
+    VkDescriptorBufferInfo bufferInfo;
+    bufferInfo.buffer = scene->GetCollidersBuffer();
+    bufferInfo.offset = 0;
+    bufferInfo.range = VK_WHOLE_SIZE;
+
+    VkWriteDescriptorSet& write = descriptorWrites[0];
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = colliderDescriptorSet;
+    write.dstBinding = 0;
+    write.dstArrayElement = 0;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    write.descriptorCount = 1;
+    write.pBufferInfo = &bufferInfo;
+
+    vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+}
+
 
 void Renderer::CreateGraphicsPipeline() {
     VkShaderModule vertShaderModule = ShaderModule::Create("shaders/graphics.vert.spv", logicalDevice);
@@ -834,7 +907,7 @@ void Renderer::CreateComputePipeline() {
     computeShaderStageInfo.pName = "main";
 
     // TODO: Add the compute dsecriptor set layout you create to this list
-    std::vector<VkDescriptorSetLayout> descriptorSetLayouts = { cameraDescriptorSetLayout, timeDescriptorSetLayout, computeDescriptorSetLayout };
+    std::vector<VkDescriptorSetLayout> descriptorSetLayouts = { cameraDescriptorSetLayout, timeDescriptorSetLayout, computeDescriptorSetLayout, colliderDescriptorSetLayout };
 
     // Create pipeline layout
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
@@ -999,7 +1072,8 @@ void Renderer::RecordComputeCommandBuffer() {
 
     // Bind descriptor set for time uniforms
     vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 1, 1, &timeDescriptorSet, 0, nullptr);
-
+    
+    vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 3, 1, &colliderDescriptorSet, 0, nullptr);
     
     // TODO: For each group of blades bind its descriptor set and dispatch
     uint num_blade_groups = this->scene->GetBlades().size();
@@ -1007,6 +1081,7 @@ void Renderer::RecordComputeCommandBuffer() {
         vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 2, 1, &computeDescriptorSets[i], 0, nullptr);
         vkCmdDispatch(computeCommandBuffer, (NUM_BLADES + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE, 1, 1);
     }
+
 
     
     // ~ End recording ~
