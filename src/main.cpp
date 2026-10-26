@@ -47,7 +47,9 @@ namespace {
             for (uint32_t x = 0; x < segments; ++x) {
                 uint32_t a = y * (segments + 1) + x;
                 uint32_t b = a + segments + 1;
-                indices.insert(indices.end(), { a, b, a + 1, a + 1, b, b + 1 });
+                // Generate outward-facing, counter-clockwise triangles so the
+                // sphere's near surface writes the correct depth.
+                indices.insert(indices.end(), { a + 1, b, a, b + 1, b, a + 1 });
             }
         }
 
