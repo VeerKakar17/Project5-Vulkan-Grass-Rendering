@@ -17,6 +17,7 @@ layout(location = 3) in vec4 up[];
 
 // Interpolated across the tessellated blade and consumed by grass.frag.
 layout(location = 0) out float bladeHeight;
+layout(location = 1) out vec3 norm;
 
 void main() {
     float u = gl_TessCoord.x;
@@ -47,4 +48,8 @@ void main() {
     gl_Position = camera.proj * camera.view * vec4(pos, 1);
     
     bladeHeight = v;
+
+    // Calculate normal
+    vec3 tangent = normalize(2 * (1 - v) * (v1[0].xyz - v0[0].xyz) + 2 * v * (v2[0].xyz - v1[0].xyz));
+    norm = normalize(cross(t1, tangent));
 }   
