@@ -7,10 +7,15 @@ Vulkan Grass Rendering
   * [LinkedIn](www.linkedin.com/in/VeerKakar), [personal website](https://veerkakar17.github.io/PortfolioWebsite)
 * Tested on: Linux Fedora 44 (Dual Boot from Windows 11 Laptop), Intel Ultra 9 275HX, NVIDIA 5070 laptop
 
+![](/src/images/FullRender.gif)
+
 ## Overview
 
 This is an implementation of the paper listed here: [Responsive Real-Time Grass Rendering for General 3D Scenes](https://www.cg.tuwien.ac.at/research/publications/2017/JAHRMANN-2017-RRTG/JAHRMANN-2017-RRTG-draft.pdf), which is an efficient grass renderer.
-This works by representing eahc blade via 3 control points and creating a basian curve, seen below. 
+This works by representing eahc blade via 3 control points and creating a bayesian curve, seen below. 
+
+![](src/images/Screenshot_20261028_230626-1.png)
+(Credit to Responsive Real-Time Grass Rendering for General 3D Scenes for this image).
 
 After this, it takes into account 3 different natural forces of wind, restoration, and gravity to get a natural grass look. You can see the effect of each independently below.
 For restoration, this is what keeps the grass standing up, so without it everything just collapses and doesn't keep it's shape. Due to not getting any relevant renders with this disabled, the images below show the results with this still enabled.
@@ -49,6 +54,15 @@ This is used to cull all grass that is not entirely within the view frustum (i.e
 This is the biggest form of culling here, which hinges on the fact that, with dense patches of grass, further portions are less visible, so it is less necessary to render as many grass blades. If we proportionally cull blades based on distance, we can save a lot of compute while still getting a very similar look.
 
 To do this, we look at the distance from the camera to each grass blade and, depending on how far they are, we cull a certain percentage of these grass blades. For example, we may say that for all blades between 4 and 6 units away from the camera, 40% of them are culled. These numbers were tuned in the paper to get an optimal performance inrease without significantly affecting the resulting render's appearance.
+
+## Levels of Details
+
+Another feature implemented here is Level of Detail. For creating the bayesian curve from the 3 control points, we use a tesselation shader which creates several vertices for this blade and arrange them according to this curve to get the correct shape. 
+
+In order to increase performance (as blades further away will be much smaller and not require as much detail as they take up much less of the screen), we reduce the amount of tesselation (reducing the overal number of vertices created) for blades further away from the camera.
+
+This allows us to save performance while still giving a high level of detail for the grass blades most visible to the camera.
+
 
 ## Performance Analaysis
 
